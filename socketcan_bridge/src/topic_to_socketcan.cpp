@@ -71,7 +71,7 @@ namespace socketcan_bridge
       {
         ROS_ERROR("Failed to send message: %s.", can::tostring(f, true).c_str());
         // Exit node on failure since it is not doing anything useful anymore. When respawn=true, communication should continue
-        EXIT(-2);
+        exit(-2);
       }
     };
 
