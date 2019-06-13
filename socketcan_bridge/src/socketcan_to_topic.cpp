@@ -38,28 +38,51 @@ namespace socketcan_bridge
       can_topic_ = nh->advertise<can_msgs::Frame>("received_messages", 10);
       driver_ = driver;
 
-      std::string lostArbLevel;
+      std::string lostArbLevel, contrErrLevel;
       nh_param->param<std::string>("lost_arbitration_reporting_level", lostArbLevel,"ARBITLOST_IS_ERROR");
       if (!lostArbLevel.compare("ARBITLOST_IS_DEBUG"))
       {
-        this->arbitrationLostIsError_ = ARBITLOST_IS_DEBUG;
+        this->arbitrationLostIsError_ = ERR_IS_DEBUG;
       }
       else if(!lostArbLevel.compare("ARBITLOST_IS_INFO"))
       {
-        this->arbitrationLostIsError_ = ARBITLOST_IS_INFO;
+        this->arbitrationLostIsError_ = ERR_IS_INFO;
       }
       else if(!lostArbLevel.compare("ARBITLOST_IS_WARN"))
       {
-        this->arbitrationLostIsError_ = ARBITLOST_IS_WARN;
+        this->arbitrationLostIsError_ = ERR_IS_WARN;
       }
       else if(!lostArbLevel.compare("ARBITLOST_IS_ERROR"))
       {
-        this->arbitrationLostIsError_ = ARBITLOST_IS_ERROR;
+        this->arbitrationLostIsError_ = ERR_IS_ERROR;
       }
       else
       {
         ROS_ERROR("Unsupported value for 'lost_arbitration_reporting_level' parameter, using ARBITLOST_IS_ERROR as default");
-        this->arbitrationLostIsError_ = ARBITLOST_IS_ERROR;
+        this->arbitrationLostIsError_ = ERR_IS_ERROR;
+      }
+
+      nh_param->param<std::string>("controller_error_reporting_level", contrErrLevel,"CTRL_PROBLEM_IS_ERROR");
+      if (!contrErrLevel.compare("CTRL_PROBLEM_IS_DEBUG"))
+      {
+        this->controllerProblemIsError_ = ERR_IS_DEBUG;
+      }
+      else if(!contrErrLevel.compare("CTRL_PROBLEM_IS_INFO"))
+      {
+        this->controllerProblemIsError_ = ERR_IS_INFO;
+      }
+      else if(!contrErrLevel.compare("CTRL_PROBLEM_IS_WARN"))
+      {
+        this->controllerProblemIsError_ = ERR_IS_WARN;
+      }
+      else if(!contrErrLevel.compare("CTRL_PROBLEM_IS_ERROR"))
+      {
+        this->controllerProblemIsError_ = ERR_IS_ERROR;
+      }
+      else
+      {
+        ROS_ERROR("Unsupported value for 'lost_arbitration_reporting_level' parameter, using CTRL_PROBLEM_IS_ERROR as default");
+        this->arbitrationLostIsError_ = ERR_IS_ERROR;
       }
 
     };
@@ -94,19 +117,34 @@ namespace socketcan_bridge
           {
             switch(arbitrationLostIsError_)
             {
-            case ARBITLOST_IS_DEBUG:
+            case ERR_IS_DEBUG:
               ROS_DEBUG("Received frame indicates an arbitration loss");
               break;
-            case ARBITLOST_IS_INFO:
+            case ERR_IS_INFO:
               ROS_INFO("Received frame indicates an arbitration loss");
               break;
-            case ARBITLOST_IS_WARN:
-            case ARBITLOST_IS_ERROR:
+            case ERR_IS_WARN:
+            case ERR_IS_ERROR:
               ROS_WARN("Received frame indicates an arbitration loss");
               break;
             }
           }
-          else
+          else if (f.id & CAN_ERR_CRTL)
+          {
+            switch(controllerProblemIsError_)
+            {
+            case ERR_IS_DEBUG:
+              ROS_DEBUG("Received frame indicates a controller problem");
+              break;
+            case ERR_IS_INFO:
+              ROS_INFO("Received frame indicates a controller problem");
+              break;
+            case ERR_IS_WARN:
+            case ERR_IS_ERROR:
+              ROS_WARN("Received frame indicates a controller problem");
+              break;
+            }
+          }
           {
             ROS_WARN("Received frame is error: %s", can::tostring(f, true).c_str());
           }

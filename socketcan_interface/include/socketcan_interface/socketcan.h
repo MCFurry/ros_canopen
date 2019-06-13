@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
- 
+
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <linux/can/error.h>
@@ -16,11 +16,11 @@
 #include <socketcan_interface/dispatcher.h>
 
 typedef enum{
-    ARBITLOST_IS_DEBUG = 0,
-    ARBITLOST_IS_INFO,
-    ARBITLOST_IS_WARN,
-    ARBITLOST_IS_ERROR
-} ArbitLost_Level_t;
+    ERR_IS_DEBUG = 0,
+    ERR_IS_INFO,
+    ERR_IS_WARN,
+    ERR_IS_ERROR
+} Error_Level_t;
 
 namespace can {
 
@@ -28,9 +28,10 @@ class SocketCANInterface : public AsioDriver<boost::asio::posix::stream_descript
     bool loopback_;
     int sc_;
 public:
-    ArbitLost_Level_t arbitrationLostIsError_;
+    Error_Level_t arbitrationLostIsError_;
+    Error_Level_t controllerProblemIsError_;
     SocketCANInterface()
-    : loopback_(false), sc_(-1), arbitrationLostIsError_(ARBITLOST_IS_ERROR)
+    : loopback_(false), sc_(-1), arbitrationLostIsError_(ERR_IS_ERROR), controllerProblemIsError_(ERR_IS_ERROR)
     {}
 
     virtual bool doesLoopBack() const{
@@ -49,7 +50,7 @@ public:
                 setErrorCode(boost::system::error_code(sc,boost::system::system_category()));
                 return false;
             }
-            
+
             struct ifreq ifr;
             strcpy(ifr.ifr_name, device_.c_str());
             int ret = ioctl(sc, SIOCGIFINDEX, &ifr);
@@ -69,44 +70,44 @@ public:
                 | CAN_ERR_BUSOFF        /* bus off */
                 //CAN_ERR_BUSERROR      /* bus error (may flood!) */
                 | CAN_ERR_RESTARTED     /* controller restarted */
-            ); 
+            );
 
             ret = setsockopt(sc, SOL_CAN_RAW, CAN_RAW_ERR_FILTER,
                &err_mask, sizeof(err_mask));
-            
+
             if(ret != 0){
                 setErrorCode(boost::system::error_code(ret,boost::system::system_category()));
                 close(sc);
                 return false;
             }
-            
+
             if(loopback_){
                 int recv_own_msgs = 1; /* 0 = disabled (default), 1 = enabled */
                 ret = setsockopt(sc, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &recv_own_msgs, sizeof(recv_own_msgs));
-                
+
                 if(ret != 0){
                     setErrorCode(boost::system::error_code(ret,boost::system::system_category()));
                     close(sc);
                     return false;
                 }
             }
-            
+
             struct sockaddr_can addr = {0};
             addr.can_family = AF_CAN;
             addr.can_ifindex = ifr.ifr_ifindex;
-            ret = bind( sc, (struct sockaddr*)&addr, sizeof(addr) );            
+            ret = bind( sc, (struct sockaddr*)&addr, sizeof(addr) );
 
             if(ret != 0){
                 setErrorCode(boost::system::error_code(ret,boost::system::system_category()));
                 close(sc);
                 return false;
             }
-            
+
             boost::system::error_code ec;
             socket_.assign(sc,ec);
-            
+
             setErrorCode(ec);
-            
+
             if(ec){
                 close(sc);
                 return false;
@@ -172,18 +173,18 @@ protected:
         boost::mutex::scoped_lock lock(send_mutex_);
         socket_.async_read_some(boost::asio::buffer(&frame_, sizeof(frame_)), boost::bind( &SocketCANInterface::readFrame,this, boost::asio::placeholders::error));
     }
-    
+
     virtual bool enqueue(const Frame & msg){
         boost::mutex::scoped_lock lock(send_mutex_); //TODO: timed try lock
 
         can_frame frame = {0};
         frame.can_id = msg.id | (msg.is_extended?CAN_EFF_FLAG:0) | (msg.is_rtr?CAN_RTR_FLAG:0);;
         frame.can_dlc = msg.dlc;
-        
-        
+
+
         for(int i=0; i < frame.can_dlc;++i)
             frame.data[i] = msg.data[i];
-        
+
         boost::system::error_code ec;
         boost::asio::write(socket_, boost::asio::buffer(&frame, sizeof(frame)),boost::asio::transfer_all(), ec);
         if(ec){
@@ -192,25 +193,27 @@ protected:
             setNotReady();
             return false;
         }
-        
+
         return true;
     }
-    
+
     void readFrame(const boost::system::error_code& error){
         if(!error){
             input_.dlc = frame_.can_dlc;
             for(int i=0;i<frame_.can_dlc && i < 8; ++i){
                 input_.data[i] = frame_.data[i];
             }
-            
+
             if(frame_.can_id & CAN_ERR_FLAG) // error message
             {
                 input_.id = frame_.can_id & CAN_EFF_MASK;
                 input_.is_error = 1;
 
                 bool errorIsArbitLost = (frame_.can_id & CAN_ERR_LOSTARB);
-                if(!errorIsArbitLost ||
-                    (errorIsArbitLost && (arbitrationLostIsError_ == ARBITLOST_IS_ERROR)))
+                bool errorIsCtrErr = (frame_.can_id & CAN_ERR_CRTL);
+                if((!errorIsArbitLost && !errorIsCtrErr) ||
+                    (errorIsArbitLost && (arbitrationLostIsError_ == ERR_IS_ERROR)) ||
+                    (errorIsCtrErr && (controllerProblemIsError_ == ERR_IS_ERROR)))
                 {
                   LOG("error: " << input_.id);
                   setInternalError(input_.id);

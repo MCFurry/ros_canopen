@@ -37,7 +37,8 @@ namespace socketcan_bridge
 class SocketCANToTopic
 {
   public:
-    ArbitLost_Level_t arbitrationLostIsError_;
+    Error_Level_t arbitrationLostIsError_;
+    Error_Level_t controllerProblemIsError_;
     SocketCANToTopic(ros::NodeHandle* nh, ros::NodeHandle* nh_param, boost::shared_ptr<can::DriverInterface> driver);
     void setup();
 
